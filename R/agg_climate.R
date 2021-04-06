@@ -88,3 +88,41 @@ aggregate_temp <- function(aoi, start_date, end_date = NULL) {
         tmin = tmin
     )
 }
+
+tidy_raster <- function(raster) {
+    rtable <- raster %>%
+              raster::rasterToPoints() %>%
+              tibble::as_tibble() %>%
+              dplyr::relocate(x, y) %>%
+              setNames(
+                  .,
+                  c("lon",
+                    "lat",
+                    stringr::str_sub(colnames(.)[-(1:2)], start = 2L))
+              ) %>%
+              tidyr::pivot_longer(
+                  cols = c(tidyselect::everything(), -(1:2)),
+                  names_to = "date"
+              ) %>%
+              dplyr::mutate(date = lubridate::ymd(date)) %>%
+              dplyr::relocate(lon, lat, value)
+
+    rtable
+}
+
+tidy_stack <- function(raster_list) {
+    param_names <- names(raster_list)
+    tidy_stacks <- lapply(X = raster_list, FUN = tidy_raster)
+
+    lapply(X = param_names,
+           FUN = function(rname) {
+               setNames(
+                   tidy_stacks[[rname]],
+                   c("lon", "lat", rname, "date")
+               )
+           }) %>%
+    purrr::reduce(dplyr::left_join, by = c("date", "lon", "lat")) %>%
+    dplyr::relocate(lon, lat, date) %>%
+    sf::st_as_sf(coords = c("lon", "lat")) %>%
+    sf::st_set_crs(4326)
+}
