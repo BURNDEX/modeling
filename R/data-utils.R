@@ -80,30 +80,6 @@ tidy_stack <- function(raster_list, as_sf = FALSE) {
     tidy_data
 }
 
-augment_signature <- function(df) {
-    df_attrs <- tolower(names(df))
-
-    if (!("lat" %in% df_attrs & "lon" %in% df_attrs)) {
-        rlang::abort("No lat/lon columns in `df`.")
-    }
-
-    if (!("date" %in% df_attrs | "time" %in% df_attrs)) {
-        rlang::abort("No `date` or `time` columns in `df`.")
-    } else if ("date" %in% df_attrs) {
-        datetime_col <- which(df_attrs == "date")
-    } else {
-        datetime_col <- which(df_attrs == "time")
-    }
-
-    df %>%
-        dplyr::group_by(lat, lon) %>%
-        timetk::tk_augment_timeseries_signature(.date_var = !!datetime_col)
-}
-
-augment_sliding <- function(df) {
-    NULL
-}
-
 aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
     p <- progressr::progressor(steps = 10L)
 
