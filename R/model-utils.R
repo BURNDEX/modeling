@@ -7,7 +7,6 @@ make_recipe <- function(template, outcome) {
         recipes::update_role(
             lon,
             lat,
-            date,
             geometry_id,
             new_role = "descriptor"
         ) %>%
@@ -155,7 +154,7 @@ make_grid <- function(levels, model_type = NULL) {
             modeltime::prior_scale_changepoints(),
             modeltime::prior_scale_seasonality(),
             modeltime::prior_scale_holidays(),
-            dials::trees(),
+            dials::trees(range = c(100L, 2000L)),
             dials::min_n(),
             dials::tree_depth(),
             dials::learn_rate(),
@@ -170,7 +169,7 @@ make_grid <- function(levels, model_type = NULL) {
             modeltime::seasonal_ar(),
             modeltime::seasonal_differences(),
             modeltime::seasonal_ma(),
-            dials::trees(),
+            dials::trees(range = c(100L, 2000L)),
             dials::min_n(),
             dials::tree_depth(),
             dials::learn_rate(),
@@ -198,21 +197,9 @@ make_grid <- function(levels, model_type = NULL) {
 }
 
 make_folds <- function(data) {
-    rsample::sliding_index(
-        data = data,
-        index = date
-    )
-    #> rsample::nested_cv(
-    #>     data,
-    #>     outside = rsample::group_vfold_cv(
-    #>         v = 10,
-    #>         group = geometry_id
-    #>     ),
-    #>     inside = rsample::rolling_origin(
-    #>         initial = 48,
-    #>         lag = 5
-    #>     )
-    #> )
+    timetk::time_series_cv(data = data,
+                           date_var = date,
+                           lag = 5)
 }
 
 make_resamples <- function(forecast_workflow, resamples, grid) {
@@ -229,4 +216,38 @@ make_fit <- function(forecast_workflow, params, data) {
         params
     ) %>%
     fit(data = data)
+}
+
+make_mt_table <- function(forecast_workflow) {
+    modeltime::modeltime_table(forecast_workflow)
+}
+
+make_calibrate <- function(mt_table, new_data) {
+    modeltime::modeltime_calibrate(
+        mt_table,
+        new_data = new_data
+    )
+}
+
+make_future <- function(new_data, length_out) {
+    timetk::future_frame(
+        .data = dplyr::group_by(new_data, lat, lon),
+        .date_var = date,
+        .length_out = length_out
+    )
+}
+
+make_forecast <- function(mt_table, new_data = NULL, h = NULL) {
+    modeltime::modeltime_forecast(
+        mt_table,
+        new_data = new_data,
+        h = h
+    )
+}
+
+make_accuracy <- function(mt_table, new_data) {
+    modeltime::modeltime_accuracy(
+        mt_table,
+        new_data = new_data
+    )
 }

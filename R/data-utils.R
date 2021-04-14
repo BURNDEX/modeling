@@ -81,7 +81,7 @@ tidy_stack <- function(raster_list, as_sf = FALSE) {
 }
 
 aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
-    p <- progressr::progressor(steps = 10L)
+    p <- progressr::progressor(steps = 3L)
 
     p("Getting climate data...")
 
