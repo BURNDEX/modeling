@@ -148,7 +148,7 @@ make_grid <- function(levels, model_type = NULL) {
 
     model_type <- tolower(model_type)
     if (model_type == "prophet") {
-        dials::grid_regular(
+        dials::grid_random(
             modeltime::changepoint_num(),
             modeltime::changepoint_range(),
             modeltime::prior_scale_changepoints(),
@@ -159,10 +159,10 @@ make_grid <- function(levels, model_type = NULL) {
             dials::tree_depth(),
             dials::learn_rate(),
             dials::loss_reduction(),
-            levels = levels
+            size = levels
         )
     } else if (model_type == "arima") {
-        dials::grid_regular(
+        dials::grid_random(
             modeltime::non_seasonal_ar(),
             modeltime::non_seasonal_differences(),
             modeltime::non_seasonal_ma(),
@@ -174,24 +174,24 @@ make_grid <- function(levels, model_type = NULL) {
             dials::tree_depth(),
             dials::learn_rate(),
             dials::loss_reduction(),
-            levels = levels
+            size = levels
         )
     } else if (model_type == "exp") {
-        dials::grid_regular(
+        dials::grid_random(
             modeltime::smooth_level(),
             modeltime::smooth_trend(),
             modeltime::smooth_seasonal(),
-            levels = levels
+            size = levels
         )
     } else {
-        dials::grid_regular(
+        dials::grid_random(
             modeltime::non_seasonal_ar(),
             modeltime::seasonal_ar(),
             dials::hidden_units(),
             modeltime::num_networks(),
             dials::penalty(),
             dials::epochs(),
-            levels = levels
+            size = levels
         )
     }
 }

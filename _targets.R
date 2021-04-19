@@ -79,7 +79,7 @@ list(
     # Make Grid
     tar_target(
         forecast_grid,
-        make_grid(1, model_type = forecast_type),
+        make_grid(50, model_type = forecast_type),
         format = "fst_tbl"
     ),
     # Make Folds
