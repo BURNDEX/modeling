@@ -4,12 +4,10 @@ preprocessing_factory <- function(...) {
     end_date   <- "2021-04-01"
 
     data_ingest <- list(
-        # Load AOI
-        tar_target(data_aoi, aoi),
         # Get GridMET Data
-        tar_target(data_gridmet, aggregate_gridmet(aoi, start_date, end_date)),
-        # Get MACA Data
-        tar_target(data_maca, aggregate_maca(aoi, start_date, end_date))
+        tar_target(data_gridmet, aggregate_gridmet(aoi, start_date, end_date))
+        # Get MACA Data (Used later)
+        #> tar_target(data_maca, aggregate_maca(aoi, start_date, end_date))
     )
 
     splitting <- list(
