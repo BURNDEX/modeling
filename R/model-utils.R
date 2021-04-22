@@ -1,253 +1,195 @@
+# ==========================================================
+# Custom Metric: NRMSE with mean norm
+# ==========================================================
+nrmse_vec <- function(truth, estimate, na_rm = TRUE, ...) {
+    nrmse_impl <- function(truth, estimate) {
+        mse_val   <- mean((truth - estimate) ^ 2)
+        rmse_val  <- sqrt(mse_val)
+        nrmse_val <- abs(100 * rmse_val / mean(truth))
+
+        nrmse_val
+    }
+
+    yardstick::metric_vec_template(
+        metric_impl = nrmse_impl,
+        truth = truth,
+        estimate = estimate,
+        na_rm = na_rm,
+        cls = "numeric",
+        ...
+    )
+}
+
+nrmse <- function(data, truth, estimate, na_rm = TRUE, ...) {
+
+    yardstick::metric_summarizer(
+        metric_nm = "nrmse",
+        metric_fn = nrmse_vec,
+        data = data,
+        truth = !! rlang::enquo(truth),
+        estimate = !! rlang::enquo(estimate),
+        na_rm = na_rm,
+        ...
+    )
+
+}
+
+nrmse <- yardstick::new_numeric_metric(nrmse, direction = "minimize")
+# ==========================================================
+
 make_recipe <- function(template, outcome) {
+    if (!deparse(substitute(outcome)) %in% names(template)) {
+        rlang::abort("Given template does not have the outcome column.")
+    }
+
+    if (!all(common_params() %in% names(template))) {
+        rlang::abort("Given template does not contain the required predictors.")
+    }
+
     recipes::recipe(template) %>%
         recipes::update_role(
             tidyselect::everything(),
             new_role = "predictor"
         ) %>%
         recipes::update_role(
-            lon,
-            lat,
-            geometry_id,
-            new_role = "descriptor"
-        ) %>%
-        recipes::update_role(
             {{ outcome }},
             new_role = "outcome"
         ) %>%
-        timetk::step_timeseries_signature(
-            tidyselect::any_of(c("date", "time"))
+        recipes::update_role(
+            lat,
+            lon,
+            new_role = "geometry"
         ) %>%
-        timetk::step_slidify_augment(
-            tmax,
-            period = c(3, 6, 12, 24),
-            .f = mean,
-            prefix = "tmax_"
-        ) %>%
-        timetk::step_slidify_augment(
-            tmin,
-            period = c(3, 6, 12, 24),
-            .f = mean,
-            prefix = "tmin_"
-        ) %>%
-        recipes::step_lag(
-            tmax,
-            lag = 5,
-            prefix = "tmax_lag_"
-        ) %>%
-        recipes::step_lag(
-            tmin,
-            lag = 5,
-            prefix = "tmin_lag_"
-        )
+        timetk::step_timeseries_signature(date) %>%
+        recipes::step_mutate(prcp = prcp + 1) %>%
+        recipes::step_log(prcp)
 }
 
-make_model <- function(model_type = NULL) {
+# TODO Geographically weighted regression
+make_model <- function(
+    model_type = c("rand_forest", "nearest_neighbor", "gwr")
+) {
+    model_type <- match.arg(model_type)
+
     if (is.null(model_type)) {
         rlang::abort("No model specified.")
     }
 
     model_type <- tolower(model_type)
 
-    if (model_type == "prophet") {
-        model <-
-            modeltime::prophet_boost() %>%
-            parsnip::set_args(
-                growth                   = "linear",
-                changepoint_num          = tune::tune(),
-                changepoint_range        = tune::tune(),
-                seasonality_yearly       = "auto",
-                seasonality_weekly       = "auto",
-                seasonality_daily        = "auto",
-                season                   = "additive",
-                prior_scale_changepoints = tune::tune(),
-                prior_scale_seasonality  = tune::tune(),
-                prior_scale_holidays     = tune::tune(),
-                trees                    = tune::tune(),
-                min_n                    = tune::tune(),
-                tree_depth               = tune::tune(),
-                learn_rate               = tune::tune(),
-                loss_reduction           = tune::tune(),
-                stop_iter                = 20
-            ) %>%
-            parsnip::set_engine("prophet_xgboost") %>%
-            parsnip::set_mode("regression")
-    } else if (model_type == "arima") {
-        model <-
-            modeltime::arima_boost() %>%
-            parsnip::set_args(
-                seasonal_period          = "auto",
-                non_seasonal_ar          = tune::tune(),
-                non_seasonal_differences = tune::tune(),
-                non_seasonal_ma          = tune::tune(),
-                seasonal_ar              = tune::tune(),
-                seasonal_differences     = tune::tune(),
-                seasonal_ma              = tune::tune(),
-                trees                    = tune::tune(),
-                min_n                    = tune::tune(),
-                tree_depth               = tune::tune(),
-                learn_rate               = tune::tune(),
-                loss_reduction           = tune::tune(),
-                stop_iter                = 20
-            ) %>%
-            parsnip::set_engine("arima_xgboost") %>%
-            parsnip::set_mode("regression")
-    } else if (model_type == "exp") {
-        model <-
-            modeltime::exp_smoothing() %>%
-            parsnip::set_args(
-                seasonal_period = "auto",
-                error           = "auto",
-                trend           = "auto",
-                season          = "auto",
-                damping         = "auto",
-                smooth_level    = tune::tune(),
-                smooth_trend    = tune::tune(),
-                smooth_seasonal = tune::tune()
-            ) %>%
-            parsnip::set_engine("ets") %>%
-            parsnip::set_mode("regression")
-    } else if (model_type == "seasonal") {
-        model <-
-            modeltime::seasonal_reg() %>%
-            parsnip::set_args(
-                seasonal_period_1 = "auto",
-                seasonal_period_2 = "auto",
-                seasonal_period_3 = "auto"
-            ) %>%
-            parsnip::set_engine("tbats") %>%
-            parsnip::set_mode("regression")
-    } else {
-        model <-
-            modeltime::nnetar_reg() %>%
-            parsnip::set_args(
-                seasonal_period = "auto",
-                non_seasonal_ar = tune::tune(),
-                seasonal_ar     = tune::tune(),
-                hidden_units    = tune::tune(),
-                num_networks    = tune::tune(),
-                penalty         = tune::tune(),
-                epochs          = tune::tune()
-            ) %>%
-            parsnip::set_engine("nnetar") %>%
-            parsnip::set_mode("regression")
-    }
+    model <- switch(
+        model_type,
+        "rand_forest" = parsnip::rand_forest(
+            mtry  = tune::tune(),
+            trees = tune::tune(),
+            min_n = tune::tune()
+        ),
+        "nearest_neighbor" = parsnip::nearest_neighbor(
+            neighbors   = tune::tune(),
+            weight_func = tune::tune(),
+            dist_power  = tune::tune()
+        ),
+        "gwr" = NULL
+    )
 
-    model
+    model_eng <- switch(
+        model_type,
+        "rand_forest"      = "ranger",
+        "nearest_neighbor" = "kknn",
+        "gwr"              = NULL
+    )
+
+    parsnip::set_mode(model, "regression") %>%
+        parsnip::set_engine(model_eng)
 }
 
-make_workflow <- function(forecast_recipe, forecast_model) {
+make_workflow <- function(rec, model) {
     workflows::workflow() %>%
-        workflows::add_model(forecast_model) %>%
-        workflows::add_recipe(forecast_recipe)
+        workflows::add_model(model) %>%
+        workflows::add_recipe(rec)
 }
 
+# TODO
 make_grid <- function(levels, model_type = NULL) {
     if (is.null(model_type)) {
         rlang::abort("No model specified.")
     }
 
     model_type <- tolower(model_type)
-    if (model_type == "prophet") {
-        dials::grid_random(
-            modeltime::changepoint_num(),
-            modeltime::changepoint_range(),
-            modeltime::prior_scale_changepoints(),
-            modeltime::prior_scale_seasonality(),
-            modeltime::prior_scale_holidays(),
-            dials::trees(range = c(100L, 2000L)),
-            dials::min_n(),
-            dials::tree_depth(),
-            dials::learn_rate(),
-            dials::loss_reduction(),
-            size = levels
-        )
-    } else if (model_type == "arima") {
-        dials::grid_random(
-            modeltime::non_seasonal_ar(),
-            modeltime::non_seasonal_differences(),
-            modeltime::non_seasonal_ma(),
-            modeltime::seasonal_ar(),
-            modeltime::seasonal_differences(),
-            modeltime::seasonal_ma(),
-            dials::trees(range = c(100L, 2000L)),
-            dials::min_n(),
-            dials::tree_depth(),
-            dials::learn_rate(),
-            dials::loss_reduction(),
-            size = levels
-        )
-    } else if (model_type == "exp") {
-        dials::grid_random(
-            modeltime::smooth_level(),
-            modeltime::smooth_trend(),
-            modeltime::smooth_seasonal(),
-            size = levels
-        )
-    } else {
-        dials::grid_random(
-            modeltime::non_seasonal_ar(),
-            modeltime::seasonal_ar(),
-            dials::hidden_units(),
-            modeltime::num_networks(),
-            dials::penalty(),
-            dials::epochs(),
-            size = levels
-        )
-    }
+    NULL
 }
 
 make_folds <- function(data) {
-    timetk::time_series_cv(data = data,
-                           date_var = date,
-                           lag = 5)
+    spatialsample::spatial_clustering_cv(
+        data = data,
+        coords = c(lat, lon),
+        v = 10
+    )
 }
 
-make_resamples <- function(forecast_workflow, resamples, grid) {
+make_resamples <- function(wkflow, resamples, grid) {
     tune::tune_grid(
-        forecast_workflow,
+        wkflow,
         resamples = resamples,
         grid = grid
     )
 }
 
-make_fit <- function(forecast_workflow, params, data) {
+make_workflow_map <- function(workflowset, resamples) {
+    workflowsets::workflow_map(
+        workflowset,
+        metric = yardstick::metric_set(
+            rmse,
+            nrmse, #* Custom metric, see above
+            mae,
+            mape,
+            rsq
+        ),
+        resamples = resamples
+    )
+}
+
+get_best_model <- function(workflowset) {
+    workflowsets::rank_results(
+        workflowset,
+        rank_metric = "rmse",
+        select_best = TRUE
+    )$wflow_id
+}
+
+get_best_params <- function(workflowset, workflow_id) {
+    workflowset %>%
+        workflowsets::pull_workflow_set_result(workflow_id) %>%
+        tune::select_best("rmse")
+}
+
+
+make_sets_fit <- function(workflowset, workflow_id, params, data) {
+    workflowset %>%
+        workflowsets::pull_workflow(workflow_id) %>%
+        make_fit(params = params, data = data)
+}
+
+make_fit <- function(wkflow, params, data) {
     tune::finalize_workflow(
-        forecast_workflow,
+        wkflow,
         params
     ) %>%
     fit(data = data)
 }
 
-make_mt_table <- function(forecast_workflow) {
-    modeltime::modeltime_table(forecast_workflow)
-}
+make_validation <- function(fit_model, testing_set, outcome) {
+    estimate <- predict(fit_model, new_data = testing_set)
+    truth    <- dplyr::select(testing_set, {{ outcome }})
+    combined <- dplyr::bind_cols(truth, estimate) %>%
+                setNames(c("truth", "estimate")) %>%
+                tibble::as_tibble()
 
-make_calibrate <- function(mt_table, new_data) {
-    modeltime::modeltime_calibrate(
-        mt_table,
-        new_data = new_data
-    )
-}
-
-make_future <- function(new_data, length_out) {
-    timetk::future_frame(
-        .data = dplyr::group_by(new_data, lat, lon),
-        .date_var = date,
-        .length_out = length_out
-    )
-}
-
-make_forecast <- function(mt_table, new_data = NULL, h = NULL) {
-    modeltime::modeltime_forecast(
-        mt_table,
-        new_data = new_data,
-        h = h
-    )
-}
-
-make_accuracy <- function(mt_table, new_data) {
-    modeltime::modeltime_accuracy(
-        mt_table,
-        new_data = new_data
+    tibble::tibble(
+        rmse  = rmse(combined, truth = truth, estimate = estimate),
+        nrmse = nrmse(combined, truth = truth, estimate = estimate),
+        mae   = mae(combined, truth = truth, estimate = estimate),
+        mape  = mape(combined, truth = truth, estimate = estimate),
+        rsq   = rsq(combined, truth = truth, estimate = estimate)
     )
 }

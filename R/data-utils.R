@@ -25,6 +25,10 @@ get_north_america <- function() {
         )
 }
 
+get_sb <- function() {
+    AOI::aoi_get(county = "Santa Barbara", state = "CA")
+}
+
 get_global <- function() {
     rnaturalearth::ne_countries() %>%
         sf::st_as_sf() %>%
@@ -80,36 +84,77 @@ tidy_stack <- function(raster_list, as_sf = FALSE) {
     tidy_data
 }
 
+common_params <- function() {
+    grid   <- climateR::param_meta$gridmet$common.name
+    maca   <- climateR::param_meta$maca$common.name
+    common <- which(grid %in% maca)
+
+    grid[common]
+}
+
 aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
     p <- progressr::progressor(steps = 3L)
 
-    p("Getting climate data...")
+    p("Getting GridMET data...")
 
     climate_data <- climateR::getGridMET(
         AOI       = aoi,
-        param     = climateR::param_meta$gridmet$common.name[-c(11, 12, 14)],
+        param     = c("burn_index", common_params()),
         startDate = start_date,
         endDate   = end_date
     )
 
-    fmoist100 <- climateR::getGridMET(
-        AOI = aoi,
-        param = "fmoist_100",
+    p("Tidying GridMET data...")
+
+    tidy_clim <-
+        tidy_stack(
+            c(climate_data),
+            as_sf = as_sf
+        ) %>%
+        dplyr::rename(
+            prcp  = tidyselect::contains("prcp"),
+            rhmax = tidyselect::contains("rhmax"),
+            rhmin = tidyselect::contains("rhmin"),
+            shum  = tidyselect::contains("shum"),
+            srad  = tidyselect::contains("srad"),
+            tmin  = tidyselect::contains("tmin"),
+            tmax  = tidyselect::contains("tmax")
+        )
+
+    p("Tidied!")
+
+    tidy_clim
+}
+
+aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
+    p <- progressr::progressor(steps = 3L)
+
+    p("Getting MACA data...")
+
+    climate_data <- climateR::getMACA(
+        AOI       = aoi,
+        param     = common_params(),
         startDate = start_date,
-        endDate   = end_date
+        endDate   = end_date,
+        model     = "BNU-ESM"
     )
 
-    fmoist1000 <- climateR::getGridMET(
-        AOI = aoi,
-        param = "fmoist_1000",
-        startDate = start_date,
-        endDate   = end_date
-    )
+    p("Tidying MACA data...")
 
-    p("Tidying climate data...")
-
-    tidy_clim <- tidy_stack(c(climate_data, fmoist100, fmoist1000),
-                            as_sf = as_sf)
+    tidy_clim <-
+        tidy_stack(
+            c(climate_data),
+            as_sf = as_sf
+        ) %>%
+        dplyr::rename(
+            prcp  = tidyselect::contains("prcp"),
+            rhmax = tidyselect::contains("rhmax"),
+            rhmin = tidyselect::contains("rhmin"),
+            shum  = tidyselect::contains("shum"),
+            srad  = tidyselect::contains("srad"),
+            tmin  = tidyselect::contains("tmin"),
+            tmax  = tidyselect::contains("tmax")
+        )
 
     p("Tidied!")
 
