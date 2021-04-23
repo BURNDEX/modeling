@@ -35,6 +35,17 @@ get_global <- function() {
         sf::st_transform("+proj=robin")
 }
 
+chandler_bi <- function(rh, t) {
+    rh_eq  <- (110 - 1.373 * rh)
+    t_eq   <- (10.20 - t)
+    rh_exp <- 10 ^ (-0.0142 * rh)
+    main   <- ((rh_eq - 0.54 * t_eq) * (124 * rh_exp))
+
+    main / 60
+}
+
+kelvin_to_fahrenheit <- function(t) ((t - 273.15) * (9 / 5) + 32)
+
 tidy_raster <- function(raster) {
     rtable <- raster %>%
               raster::rasterToPoints() %>%
@@ -99,7 +110,7 @@ aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
 
     climate_data <- climateR::getGridMET(
         AOI       = aoi,
-        param     = c("burn_index", common_params()),
+        param     = common_params(),
         startDate = start_date,
         endDate   = end_date
     )
@@ -112,14 +123,32 @@ aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
             as_sf = as_sf
         ) %>%
         dplyr::rename(
-            prcp  = tidyselect::contains("prcp"),
-            rhmax = tidyselect::contains("rhmax"),
-            rhmin = tidyselect::contains("rhmin"),
-            shum  = tidyselect::contains("shum"),
-            srad  = tidyselect::contains("srad"),
-            tmin  = tidyselect::contains("tmin"),
-            tmax  = tidyselect::contains("tmax")
-        )
+            prcp       = tidyselect::contains("prcp"),
+            rhmax      = tidyselect::contains("rhmax"),
+            rhmin      = tidyselect::contains("rhmin"),
+            shum       = tidyselect::contains("shum"),
+            srad       = tidyselect::contains("srad"),
+            tmin       = tidyselect::contains("tmin"),
+            tmax       = tidyselect::contains("tmax"),
+        ) %>%
+        dplyr::mutate(
+            cbi_rhmax_tmax = chandler_bi(rhmax, tmax),
+            cbi_rhmin_tmax = chandler_bi(rhmin, tmax),
+            cbi_rhavg_tmax = chandler_bi(rhavg, tmax),
+            cbi_rhmax_tmin = chandler_bi(rhmax, tmin),
+            cbi_rhmin_tmin = chandler_bi(rhmin, tmin),
+            cbi_rhavg_tmin = chandler_bi(rhavg, tmin),
+            cbi_rhmax_tavg = chandler_bi(rhmax, tavg),
+            cbi_rhmin_tavg = chandler_bi(rhmin, tavg),
+            cbi_rhavg_tavg = chandler_bi(rhavg, tavg),
+            burn_index = (
+                cbi_rhmax_tmax + cbi_rhmin_tmax + cbi_rhavg_tmax +
+                cbi_rhmax_tmin + cbi_rhmin_tmin + cbi_rhavg_tmin +
+                cbi_rhmax_tavg + cbi_rhmin_tavg + cbi_rhavg_tavg
+            ) / 9
+        ) %>%
+        dplyr::select(prcp, rhmax, rhmin, shum,
+                      srad, tmin, tmax, burn_index)
 
     p("Tidied!")
 
@@ -154,7 +183,25 @@ aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
             srad  = tidyselect::contains("srad"),
             tmin  = tidyselect::contains("tmin"),
             tmax  = tidyselect::contains("tmax")
-        )
+        ) %>%
+        dplyr::mutate(
+            cbi_rhmax_tmax = chandler_bi(rhmax, tmax),
+            cbi_rhmin_tmax = chandler_bi(rhmin, tmax),
+            cbi_rhavg_tmax = chandler_bi(rhavg, tmax),
+            cbi_rhmax_tmin = chandler_bi(rhmax, tmin),
+            cbi_rhmin_tmin = chandler_bi(rhmin, tmin),
+            cbi_rhavg_tmin = chandler_bi(rhavg, tmin),
+            cbi_rhmax_tavg = chandler_bi(rhmax, tavg),
+            cbi_rhmin_tavg = chandler_bi(rhmin, tavg),
+            cbi_rhavg_tavg = chandler_bi(rhavg, tavg),
+            burn_index = (
+                cbi_rhmax_tmax + cbi_rhmin_tmax + cbi_rhavg_tmax +
+                cbi_rhmax_tmin + cbi_rhmin_tmin + cbi_rhavg_tmin +
+                cbi_rhmax_tavg + cbi_rhmin_tavg + cbi_rhavg_tavg
+            ) / 9
+        ) %>%
+        dplyr::select(prcp, rhmax, rhmin, shum,
+                      srad, tmin, tmax, burn_index)
 
     p("Tidied!")
 
