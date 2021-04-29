@@ -67,7 +67,8 @@ make_recipe <- function(template, outcome) {
 
 # TODO Geographically weighted regression
 make_model <- function(
-    model_type = c("rand_forest", "nearest_neighbor", "gwr")
+    model_type = c("rand_forest", "nearest_neighbor",
+                   "neural_network", "gwr")
 ) {
     model_type <- match.arg(model_type)
 
@@ -89,13 +90,19 @@ make_model <- function(
             weight_func = tune::tune(),
             dist_power  = tune::tune()
         ),
+        "neural_network" = parsnip::mlp(
+            hidden_units = tune::tune(),
+            penalty      = tune::tune(),
+            epochs       = tune::tune()
+        ),
         "gwr" = NULL
     )
 
     model_eng <- switch(
         model_type,
-        "rand_forest"      = "ranger",
+        "rand_forest"      = "randomForest",
         "nearest_neighbor" = "kknn",
+        "neural_network"   = "nnet",
         "gwr"              = NULL
     )
 
@@ -109,22 +116,62 @@ make_workflow <- function(rec, model) {
         workflows::add_recipe(rec)
 }
 
-# TODO
-make_grid <- function(levels, model_type = NULL) {
+make_grid <- function(
+    levels,
+    model_type = c("rand_forest", "nearest_neighbor",
+                   "neural_network", "gwr")
+) {
     if (is.null(model_type)) {
         rlang::abort("No model specified.")
     }
 
     model_type <- tolower(model_type)
-    NULL
+
+    grid <- switch(
+        model_type,
+        "rand_forest" = dials::grid_regular(
+            dials::mtry(range = c(1L, 15L)),
+            dials::trees(),
+            dials::min_n(),
+            levels = levels
+        ),
+        "nearest_neighbor" = dials::grid_regular(
+            dials::neighbors(),
+            dials::weight_func(),
+            dials::dist_power(),
+            levels = levels
+        ),
+        "neural_network" = dials::grid_regular(
+            dials::hidden_units(),
+            dials::penalty(),
+            dials::epochs(),
+            levels = levels
+        ),
+        "gwr" = NULL
+    )
+
+    grid
 }
 
-make_folds <- function(data) {
-    spatialsample::spatial_clustering_cv(
-        data = data,
-        coords = c(lat, lon),
-        v = 10
-    )
+make_folds <- function(data, nested = FALSE) {
+    if (nested) {
+        rsample::nested_cv(
+            data = data,
+            outside = rsample::sliding_index(
+                index = date
+            ),
+            inside = spatialsample::spatial_clustering_cv(
+                coords = c(lat, lon),
+                v = 10
+            )
+        )
+    } else {
+        spatialsample::spatial_clustering_cv(
+            data = data,
+            coords = c(lat, lon),
+            v = 10
+        )
+    }
 }
 
 make_resamples <- function(wkflow, resamples, grid) {
@@ -138,14 +185,15 @@ make_resamples <- function(wkflow, resamples, grid) {
 make_workflow_map <- function(workflowset, resamples) {
     workflowsets::workflow_map(
         workflowset,
-        metric = yardstick::metric_set(
+        resamples = resamples,
+        metrics = yardstick::metric_set(
             rmse,
-            nrmse, #* Custom metric, see above
+            #> nrmse, #* Custom metric, see above
             mae,
             mape,
             rsq
         ),
-        resamples = resamples
+        verbose = TRUE
     )
 }
 
@@ -172,8 +220,8 @@ make_sets_fit <- function(workflowset, workflow_id, params, data) {
 
 make_fit <- function(wkflow, params, data) {
     tune::finalize_workflow(
-        wkflow,
-        params
+        x = wkflow,
+        parameters = params
     ) %>%
     fit(data = data)
 }

@@ -109,7 +109,7 @@ aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
     p("Getting GridMET data...")
 
     climate_data <- climateR::getGridMET(
-        AOI       = aoi,
+        AOI       = sf::st_transform(aoi, 4326),
         param     = common_params(),
         startDate = start_date,
         endDate   = end_date
@@ -132,6 +132,8 @@ aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
             tmax       = tidyselect::contains("tmax"),
         ) %>%
         dplyr::mutate(
+            rhavg = (rhmax + rhmin) / 2,
+            tavg  = (tmax + tmin) / 2,
             cbi_rhmax_tmax = chandler_bi(rhmax, tmax),
             cbi_rhmin_tmax = chandler_bi(rhmin, tmax),
             cbi_rhavg_tmax = chandler_bi(rhavg, tmax),
@@ -147,7 +149,7 @@ aggregate_gridmet <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
                 cbi_rhmax_tavg + cbi_rhmin_tavg + cbi_rhavg_tavg
             ) / 9
         ) %>%
-        dplyr::select(prcp, rhmax, rhmin, shum,
+        dplyr::select(lat, lon, date, prcp, rhmax, rhmin, shum,
                       srad, tmin, tmax, burn_index)
 
     p("Tidied!")
@@ -185,6 +187,8 @@ aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
             tmax  = tidyselect::contains("tmax")
         ) %>%
         dplyr::mutate(
+            rhavg = (rhmax + rhmin) / 2,
+            tavg  = (tmax + tmin) / 2,
             cbi_rhmax_tmax = chandler_bi(rhmax, tmax),
             cbi_rhmin_tmax = chandler_bi(rhmin, tmax),
             cbi_rhavg_tmax = chandler_bi(rhavg, tmax),
@@ -200,7 +204,7 @@ aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
                 cbi_rhmax_tavg + cbi_rhmin_tavg + cbi_rhavg_tavg
             ) / 9
         ) %>%
-        dplyr::select(prcp, rhmax, rhmin, shum,
+        dplyr::select(lat, lon, date, prcp, rhmax, rhmin, shum,
                       srad, tmin, tmax, burn_index)
 
     p("Tidied!")
