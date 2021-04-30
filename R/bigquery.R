@@ -3,6 +3,8 @@ library(dplyr)
 library(bigrquery)
 source("R/data-utils.R")
 
+bigrquery::bq_auth(path = "burndex-19597aebb216.json")
+
 # ====================================================================
 # Uploading Tidied gridMET Data to Google BiqQuery
 # ====================================================================
@@ -23,8 +25,19 @@ source("R/data-utils.R")
 #' @param years Character vector containing the years to upload
 #' @return A matrix of all years uploaded
 bq_gridmet <- function(years) {
-    conus       <- get_conus()
-    states      <- "OR" # conus$state_abbr
+    states <- state.abb[-which(state.abb %in% c("HI", "AK", "PR"))]
+    counties_pair <- unlist(lapply(
+        X = states,
+        FUN = function(state_abb) {
+            paste0(
+                AOI::aoi_get(county = "all", state = state_abb)$name,
+                "_",
+                state_abb
+            )
+        }
+    ))
+
+
     years       <- as.character(years)
     start_dates <- paste0(years, "-01-01")
     end_dates   <- paste0(years, "-12-31")
@@ -49,24 +62,26 @@ bq_gridmet <- function(years) {
     } else {
         cat(crayon::green("\n✓"), crayon::magenta("All datasets created!"))
 
-        input <- readline(
-            paste0(
-                crayon::yellow("★ "),
-                crayon::magenta("Upload gridMET data from "),
-                crayon::bold(years[1]),
-                crayon::magenta(" to "),
-                crayon::bold(years[length(years)]),
-                crayon::magenta("? "),
-                crayon::silver("["),
-                crayon::green("y"),
-                crayon::silver("/"),
-                crayon::red("n"),
-                crayon::silver("]: ")
+        if (interactive()) {
+            input <- readline(
+                paste0(
+                    crayon::yellow("★ "),
+                    crayon::magenta("Upload gridMET data from "),
+                    crayon::bold(years[1]),
+                    crayon::magenta(" to "),
+                    crayon::bold(years[length(years)]),
+                    crayon::magenta("? "),
+                    crayon::silver("["),
+                    crayon::green("y"),
+                    crayon::silver("/"),
+                    crayon::red("n"),
+                    crayon::silver("]: ")
+                )
             )
-        )
 
-        if (tolower(input) != "y" & tolower(input) != "yes") {
-            rlang::abort("User stopped upload.")
+            if (tolower(input) != "y" & tolower(input) != "yes") {
+                rlang::abort("User stopped upload.")
+            }
         }
     }
 
@@ -89,7 +104,7 @@ bq_gridmet <- function(years) {
     # (1.2)
     bq_matrix <-
         foreach::foreach(
-            state_abb = states,
+            county = counties_pair,
             .combine = "cbind",
             .export = required_exports,
             .packages = required_packages
@@ -100,13 +115,17 @@ bq_gridmet <- function(years) {
                 .combine = "c",
                 .export = required_exports,
                 .packages = required_packages
-            ) %do% {
+            ) %dopar% {
+                split_      <- stringr::str_split(county, "_")[[1]]
+                county_name <- split_[1]
+                state_abb   <- split_[2]
 
                 cat(
                     crayon::blue("⬤"),
                     crayon::green(paste0("[", state_abb, "]")),
                     crayon::red(paste(
                         "Starting",
+                        paste0(county_name, ","),
                         state_abb,
                         "from",
                         start_date,
@@ -117,11 +136,9 @@ bq_gridmet <- function(years) {
                 )
 
                 # Get state
-                current_aoi <- sf::st_as_sf(
-                    dplyr::filter(
-                        conus,
-                        state_abbr == state_abb
-                    )
+                current_aoi <- AOI::aoi_get(
+                    county = county_name,
+                    state = state_abb
                 )
 
                 # Upload to BigQuery
@@ -141,13 +158,19 @@ bq_gridmet <- function(years) {
 # Function for (1.2)
 bq_upload <- function(aoi, start_date, end_date) {
     year          <- substr(start_date, 0, 4)
+    county_name   <- tolower(aoi$name) %>%
+                     stringr::str_replace(" ", "_")
     state_abbr    <- tolower(aoi$state_abbr)
-    bq_table_name <- paste0(state_abbr, "_", year)
+    bq_table_name <- paste0(county_name, "_", state_abbr, "_", year)
     bq_new_table  <- bigrquery::bq_table(
         project = "burndex",
         dataset = paste0("gridmet_", state_abbr),
         table   = bq_table_name
     )
+
+    if (bigrquery::bq_table_exists(bq_new_table)) {
+        return(bq_new_table)
+    }
 
     cat(
         crayon::blue("⬤"),
@@ -168,20 +191,20 @@ bq_upload <- function(aoi, start_date, end_date) {
         crayon::red("Creating BQ Table\n")
     )
     # (2)
-    if (!bigrquery::bq_table_exists(bq_new_table)) {
-        bigrquery::bq_table_create(
-            x = bq_new_table,
-            fields = gridmet_data,
-            friendly_name = paste(
-                aoi$state_name,
-                "gridMET Climate Data"
-            ),
-            description = paste(
-                aoi$state_name, "tidied gridMET climate data from",
-                start_date, "to", end_date
-            )
+    bigrquery::bq_table_create(
+        x = bq_new_table,
+        fields = gridmet_data,
+        friendly_name = paste0(
+            aoi$name, ", ",
+            aoi$state_name,
+            " gridMET Climate Data"
+        ),
+        description = paste0(
+            aoi$name, ", ", aoi$state_name,
+            " tidied gridMET climate data from ",
+            start_date, " to ", end_date
         )
-    }
+    )
 
     cat(
         crayon::blue("⬤"),
@@ -210,8 +233,29 @@ bq_upload <- function(aoi, start_date, end_date) {
 # Storing 40 years of data
 # ====================================================================
 
+cores <- parallel::detectCores()[1] - 2
+cl    <- parallel::makeCluster(cores, outfile = "")
+doParallel::registerDoParallel(cl)
+
+parallel::clusterEvalQ(
+    cl = cl,
+    expr = {
+        library(foreach)
+        library(tidyverse)
+        library(sf)
+        library(bigrquery)
+        library(climateR)
+        library(AOI)
+        library(crayon)
+        source("R/data-utils.R")
+    }
+)
+
 # Get 40 years
-years <- as.character(1981L)
+years <- as.character(1980L:2020L)
 
 # Run operation
 bq_gridmet(years)
+
+doParallel::stopImplicitCluster()
+parallel::stopCluster(cl)
