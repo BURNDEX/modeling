@@ -55,11 +55,6 @@ make_recipe <- function(template, outcome) {
             {{ outcome }},
             new_role = "outcome"
         ) %>%
-        recipes::update_role(
-            lat,
-            lon,
-            new_role = "geometry"
-        ) %>%
         timetk::step_timeseries_signature(date) %>%
         recipes::step_mutate(prcp = prcp + 1) %>%
         recipes::step_log(prcp)
@@ -68,7 +63,7 @@ make_recipe <- function(template, outcome) {
 # TODO Geographically weighted regression
 make_model <- function(
     model_type = c("rand_forest", "nearest_neighbor",
-                   "neural_network", "gwr")
+                   "neural_network", "gwr", "mars")
 ) {
     model_type <- match.arg(model_type)
 
@@ -95,14 +90,25 @@ make_model <- function(
             penalty      = tune::tune(),
             epochs       = tune::tune()
         ),
+        "linear_reg" = parsnip::linear_reg(
+            penalty = tune::tune(),
+            mixture = tune::tune()
+        ),
+        "mars" = parsnip::mars(
+            num_terms = tune::tune(),
+            prod_degree = tune::tune(),
+            prune_method = tune::tune()
+        ),
         "gwr" = NULL
     )
 
     model_eng <- switch(
         model_type,
-        "rand_forest"      = "randomForest",
+        "rand_forest"      = "ranger",
         "nearest_neighbor" = "kknn",
         "neural_network"   = "nnet",
+        "linear_reg"       = "lm",
+        "mars"             = "earth",
         "gwr"              = NULL
     )
 
@@ -119,7 +125,7 @@ make_workflow <- function(rec, model) {
 make_grid <- function(
     levels,
     model_type = c("rand_forest", "nearest_neighbor",
-                   "neural_network", "gwr")
+                   "neural_network", "gwr", "mars")
 ) {
     if (is.null(model_type)) {
         rlang::abort("No model specified.")
@@ -146,6 +152,16 @@ make_grid <- function(
             dials::penalty(),
             dials::epochs(),
             levels = levels
+        ),
+        "linear_reg" = dials::grid_regular(
+            dials::penalty(),
+            dials::mixture(),
+            levels = levels
+        ),
+        "mars" = dials::grid_regular(
+            dials::num_terms(range = c(1L, 10L)),
+            dials::prod_degree(),
+            dials::prune_method()
         ),
         "gwr" = NULL
     )
@@ -178,7 +194,8 @@ make_resamples <- function(wkflow, resamples, grid) {
     tune::tune_grid(
         wkflow,
         resamples = resamples,
-        grid = grid
+        grid = grid,
+        control = stacks::control_stack_grid()
     )
 }
 

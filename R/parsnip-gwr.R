@@ -100,15 +100,15 @@ parsnip::set_pred(
     )
 )
 
-gwr_tst <- linear_reg() %>%
-    set_engine("gwr") %>%
-    set_args(
-        coords = c("longitude", "latitude"),
-        bw = 1000
-    ) %>%
-    fit(price ~ beds + baths + sqft, data = Sacramento[1:500, ])
-
-gwr_pred <- predict(
-    gwr_tst,
-    new_data = Sacramento[500:900, ]
-)
+# gwr_tst <- linear_reg() %>%
+#     set_engine("gwr") %>%
+#     set_args(
+#         coords = c("longitude", "latitude"),
+#         bw = 1000
+#     ) %>%
+#     fit(price ~ beds + baths + sqft, data = Sacramento[1:500, ])
+# 
+# gwr_pred <- predict(
+#     gwr_tst,
+#     new_data = Sacramento[500:900, ]
+# )

@@ -162,13 +162,22 @@ aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
 
     p("Getting MACA data...")
 
-    climate_data <- climateR::getMACA(
+    relative_humidity <- climateR::getMACA(
         AOI       = aoi,
-        param     = common_params(),
+        param     = c("rhmax", "rhmin"),
         startDate = start_date,
         endDate   = end_date,
         model     = "BNU-ESM"
     )
+
+    other_climate <- climateR::getMACA(
+        AOI       = aoi,
+        param     = common_params()[common_params() %in% c("rhmax", "rhmin")],
+        startDate = start_date,
+        endDate   = end_date
+    )
+
+    climate_data <- c(other_climate, relative_humidity)
 
     p("Tidying MACA data...")
 
@@ -210,4 +219,25 @@ aggregate_maca <- function(aoi, start_date, end_date = NULL, as_sf = FALSE) {
     p("Tidied!")
 
     tidy_clim
+}
+
+tidy_to_raster <- function(data, x, y, z) {
+    xyz <- data %>%
+           dplyr::select({{ x }}, {{ y }}, {{ z }}) %>%
+           dplyr::rename(
+               x = {{ x }},
+               y = {{ y }},
+               z = {{ z }}
+           )
+
+    raster::rasterFromXYZ(
+        xyz = xyz,
+        crs = sf::st_crs(4326)$proj4string
+    )
+}
+
+datename_to_col <- function(string) {
+    stringr::str_replace_all(string, "[.]", "-") %>%
+        stringr::str_remove("X") %>%
+        lubridate::ymd()
 }

@@ -1,41 +1,16 @@
 preprocessing_factory <- function() {
 
-    data_ingest <- list(
-        # Get GridMET Data
-        tar_target(
-            data_gridmet,
-            aggregate_gridmet(
-                data_params$aoi,
-                data_params$start_date,
-                data_params$end_date
-            )
-        )
-        # Get MACA Data (Used later)
-        #> tar_target(data_maca, aggregate_maca(aoi, start_date, end_date))
-    )
-
-    splitting <- list(
-        # Split GridMET Data
-        tar_target(init_split, rsample::initial_split(data_gridmet)),
-        # Get Training Data
-        tar_target(init_training, rsample::training(init_split)),
-        # Get Testing Data
-        tar_target(init_testing, rsample::testing(init_split)),
-        # Make Spatial CV Folds
-        tar_target(init_cv, make_folds(init_training))
-    )
-
     modeling_setup <- list(
         # Setup Model Recipe
-        tar_target(setup_rec, make_recipe(init_training, burn_index)),
+        tar_target(setup_rec, make_recipe(template, burn_index)),
         # Setup Grid Levels
         tar_target(setup_lvls, 3),
         # Setup Random Forest Model/Grid
         tar_target(setup_rf, make_model("rand_forest")),
         tar_target(setup_grid_rf, make_grid(setup_lvls, "rand_forest")),
         # Setup K-Nearest Neighbor Model/Grid
-        tar_target(setup_knn, make_model("nearest_neighbor")),
-        tar_target(setup_grid_knn, make_grid(setup_lvls, "nearest_neighbor")) #,
+        tar_target(setup_mars, make_model("mars")),
+        tar_target(setup_grid_mars, make_grid(setup_lvls, "mars")) #,
         # Setup Geographically Weighted Regression Model/Grid
         # tar_target(setup_gwr, make_model("gwr")),
         # tar_target(setup_grid_gwr, make_grid(setup_lvls, "gwr"))
@@ -84,14 +59,14 @@ preprocessing_factory <- function() {
                 workflows::add_recipe(setup_rec)
         ),
         tar_target(
-            workflow_knn,
+            workflow_mars,
             workflows::workflow() %>%
-                workflows::add_model(setup_knn) %>%
+                workflows::add_model(setup_mars) %>%
                 workflows::add_recipe(setup_rec)
         )
     )
 
-    c(data_ingest, splitting, modeling_setup, workflow_setup)
+    c(modeling_setup, workflow_setup)
 }
 
 training_factory <- function() {
@@ -114,23 +89,76 @@ training_factory <- function() {
     #>     )
     #> )
 
+    data_ingest <- list(
+        # Get GridMET Data
+        tar_target(
+            data_gridmet,
+            if (force_structure) {
+                fst::read_fst(
+                    paste0(
+                        "/mnt/x/california/",
+                        region_year,
+                        ".fst"
+                    )
+                ) %>%
+                    tibble::as_tibble() %>%
+                    dplyr::slice_sample(n = 500000)
+            }
+        )
+        # Get MACA Data (Used later)
+        #> tar_target(data_maca, aggregate_maca(aoi, start_date, end_date))
+    )
+
+    splitting <- list(
+        # Split GridMET Data
+        tar_target(init_split, rsample::initial_split(data_gridmet)),
+        # Get Training Data
+        tar_target(init_training, rsample::training(init_split)),
+        # Get Testing Data
+        tar_target(init_testing, rsample::testing(init_split)),
+        # Make Spatial CV Folds
+        tar_target(init_cv, make_folds(init_training))
+    )
+
     resampling <- list(
-        # tar_target(res_rf, make_resamples(workflow_rf, init_cv, setup_grid_rf)),
-        tar_target(res_knn, make_resamples(workflow_knn, init_cv, setup_grid_knn)),
-        tar_target(best_knn, tune::select_best(res_knn, "rmse")),
-        tar_target(fit_knn, make_fit(workflow_knn, best_knn, init_training))
+        tar_target(res_mars, make_resamples(workflow_mars, init_cv, setup_grid_mars)),
+        tar_target(best_mars, tune::select_best(res_mars, "rmse")),
+        tar_target(
+            fit_mars,
+            make_fit(workflow_mars, best_mars, init_training)
+        )#,
+        #> tar_target(res_rf, make_resamples(workflow_rf, init_cv, setup_grid_rf)),
+        #> tar_target(res_knn, make_resamples(workflow_knn, init_cv, setup_grid_knn)),
+        #> tar_target(best_rf, tune::select_best(res_rf, "rmse")),
+        #> tar_target(best_knn, tune::select_best(res_knn, "rmse")),
+        #> tar_target(
+        #>     fit_rf,
+        #>     make_fit(workflow_rf, best_rf, init_training)
+        #> ),
+        #> tar_target(
+        #>     fit_knn,
+        #>     make_fit(workflow_knn, best_knn, init_training)
+        #> )
     )
 
     validation <- list(
         tar_target(
             model_validation,
             make_validation(
-                fit_model   = fit_knn,
+                fit_model   = fit_mars,
                 testing_set = init_testing,
                 outcome     = burn_index
             )
-        )
+        ) #,
+        # tar_target(
+        #     model_validation,
+        #     make_validation(
+        #         fit_model   = fit_knn,
+        #         testing_set = init_testing,
+        #         outcome     = burn_index
+        #     )
+        # )
     )
 
-    c(resampling, validation)
+    c(data_ingest, splitting, resampling, validation)
 }
